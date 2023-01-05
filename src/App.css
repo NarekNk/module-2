@@ -1,0 +1,32 @@
+.card-holder {
+  display: flex;
+  gap: 20px;
+}
+
+.card {
+  padding: 15px 20px;
+  border: 1px solid black;
+  border-radius: 12px;
+  margin: 10px;
+}
+
+.btn {
+  padding: 10px 20px;
+}
+
+.card-btn {
+  margin-top: 20px;
+}
+
+.connect-btn {
+  margin: 20px;
+}
+
+.input {
+  padding: 10px;
+}
+
+.error {
+  font-size: 14px;
+  color: red;
+}
