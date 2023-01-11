@@ -4,7 +4,6 @@ import { clusterApiUrl, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, sendAn
 import * as buffer from 'buffer';
 window.Buffer = buffer.Buffer;
 
-
 type DisplayEncoding = 'utf8' | 'hex';
 type PhantomEvent = 'disconnect' | 'connect' | 'accountChanged';
 type PhantomRequestMethod =
@@ -35,21 +34,21 @@ type PhantomProvider = {
 
 const getProvider = () => {
   if('solana' in window) {
-    const solana = window.solana as any;
-
-    if(solana.isPhantom) return solana as PhantomProvider;
+    const provider = window.solana as any;
+    
+    if(provider.isPhantom) return provider as PhantomProvider;
   }
 }
 
+const connection = new Connection(clusterApiUrl('devnet', true), 'confirmed');
+
 const App = () => {
-  const [provider, setProvider] = useState<PhantomProvider | undefined>();
+  const [notification, setNotification] = useState<string>('');
   const [connectedWalletKey, setConnectedWalletKey] = useState<string | undefined>(undefined);
   const [connectedBalance, setConnectedBalance] = useState<number | undefined>();
   const [newWalletBalance, setNewWalletBalance] = useState<number | undefined>();
   const [newWallet, setNewWallet] = useState<Keypair | undefined>();
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-  const [amount, setAmount] = useState<number>(0);
 
   const connectProvider = async () => {
     const provider = getProvider();
@@ -76,9 +75,7 @@ const App = () => {
   }
 
   const getBalance = async (pubKey: PublicKey) => {
-    try {
-      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-  
+    try {  
       const balance = await connection.getBalance(pubKey);
       return balance;
     } catch (err) {
@@ -87,25 +84,23 @@ const App = () => {
   }
 
   const createWallet = async () => {
+    setNotification('Generating a new keypair and airdropping some sol ...');
     try {
-      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-  
       const pair = Keypair.generate();
-      const transaction = await connection.requestAirdrop(new PublicKey(pair.publicKey), 2 * LAMPORTS_PER_SOL);
-  
-      await connection.confirmTransaction(transaction);
+      setLoading(true);
       
-      const balance = await getBalance(pair.publicKey);
-
-      if(balance) {
-        setNewWalletBalance(balance / LAMPORTS_PER_SOL);
-      } else {
-        setNewWalletBalance(0);
-      }
-
+      await requestAirdrop(pair.publicKey).then(async () => {
+        await requestAirdrop(pair.publicKey);
+      })
+      
+      const balance = await connection.getBalance(pair.publicKey);
       setNewWallet(pair);
+      setNewWalletBalance(balance / LAMPORTS_PER_SOL);
     } catch (err) {
       console.log(err);
+    } finally {
+      setLoading(false);
+      setNotification('');
     }
   }
 
@@ -117,10 +112,26 @@ const App = () => {
       }
     }
     if(newWallet) {
-      const balance = await getBalance(newWallet?.publicKey as PublicKey)
+      const balance = await getBalance(new PublicKey(newWallet.publicKey))
       if(balance) {
         setNewWalletBalance(balance / LAMPORTS_PER_SOL);
       }
+    }
+  }
+
+  const requestAirdrop = async (pubKey: PublicKey) => {
+    try {
+      const airdrop = await connection.requestAirdrop(new PublicKey(pubKey), 2 * LAMPORTS_PER_SOL);
+      
+      let latestBlockHash = await connection.getLatestBlockhash();
+      
+      await connection.confirmTransaction({
+        blockhash: latestBlockHash.blockhash,
+        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+        signature: airdrop,
+      });
+    } catch (err) {
+      console.log(err);
     }
   }
 
@@ -128,43 +139,26 @@ const App = () => {
     if(!newWallet || !connectedWalletKey) {
       return;
     }
+    setNotification('Transfering sol ...')
     try {
       setLoading(true);
-      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-
-      const balance = await getBalance(newWallet.publicKey);
-      // assume commission is 0.1 SOL
-      if(!balance || balance <= (amount + 0.1) * LAMPORTS_PER_SOL) {
-        setError('Not enough SOL in account');
-        return;
-      }
-      setError('');
       const transaction = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: new PublicKey(newWallet.publicKey),
           toPubkey: new PublicKey(connectedWalletKey),
-          lamports: amount * LAMPORTS_PER_SOL,
+          lamports: 2 * LAMPORTS_PER_SOL,
         })
       )
-
+      
       await sendAndConfirmTransaction(connection, transaction, [newWallet]);
       await fetchBalances();
     } catch (err) {
       console.log(err);
     } finally {
       setLoading(false);
+      setNotification('')
     }
   }
-
-  useEffect(() => {
-    const provider = getProvider();
-
-    if(provider) {
-      setProvider(provider);
-    } else {
-      setProvider(undefined);
-    }
-  }, []);
 
   return (
     <div>
@@ -174,6 +168,7 @@ const App = () => {
       }
       <div className='card-holder'>
         <div className='card'>
+          <h3>New Wallet</h3>
           {!newWallet && 
             <button onClick={createWallet} className="btn">Create wallet</button>
           }
@@ -185,17 +180,14 @@ const App = () => {
                 : `${newWalletBalance} SOL`
             }
           </div>}
-          <p className='error'>
-            {error}
-          </p>
           {
             connectedWalletKey && newWallet && <div>
-              <input type="number" value={amount} onChange={(e) => setAmount(+e.target.value)} className="input" step={0.1}/>
-              <button onClick={transfer} className="btn card-btn">Transfer SOL</button>
+              <button onClick={transfer} className="btn card-btn">Transfer SOL</button>{' '}
             </div>
           }
         </div>
         {connectedWalletKey && <div className='card'>
+            <h3>Phantom</h3>
             {connectedWalletKey}<br/>
             {
               loading 
@@ -206,7 +198,11 @@ const App = () => {
             <button onClick={disconnectProvider} className="btn card-btn">Disconnect Wallet</button>
           </div>}
       </div>
-
+      {
+        notification.length ? <div className='notification'>
+          {notification}
+        </div> : null
+      }
     </div>
   );
 }
